@@ -1,0 +1,62 @@
+
+body {
+font:"Georgia",serif;
+}
+h1 {
+font-size:40px;
+text-align:center;
+}
+#wrapper {
+position:relative;
+width:960px;
+height:800px;
+margin:0 auto;
+}
+#footer {
+text-align:center;
+width:100%;
+height:60px;
+}
+
+/* BOARD */
+#toplay {
+display:none;
+}
+#board {
+border:none;
+padding:0;
+margin:0 auto;
+position:relative;
+left:0;
+width:600px;
+height:600px;
+}
+#board .square {
+display:inline-block;
+width:72px;
+height:72px;
+}
+#board .square.light {
+background:#fff;
+}
+#board .square.dark {
+background:#bbb; /*#d0d8e0*/
+}
+#board .square.canMove {
+background:#cef;
+}
+
+#board .piece {
+position:absolute;
+padding:12px; /* (72-48)/2 */
+}
+
+/* CHESS NOTATION */
+#moves {
+background:white;
+border:none;
+left:660px;
+width:300px;
+height:600px;
+}
+
