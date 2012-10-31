@@ -5,7 +5,10 @@ var model = {
     board:[[]], //piece ids like "wK" or "wp1"
     pieces:{},  //piece id -> [row,col] 0-based
     moves:[],   //strings like "e4e5"
-    turn:0      //0-based turn, white goes on 0, black on 1, etc
+    turn:0,     //0-based turn, white goes on 0, black on 1, etc
+    outcome:"playing", //otherwise "black", "white", or "tie"
+    clock: {black:0, white:0},
+    lastMove: {date:null, clock:0}
 };
 
 var view = {
@@ -38,11 +41,20 @@ model.reset = function(){
         }
     }
     model.moves = [];
+
+    // each player gets five minutes
+    model.clock.black = 5*60;
+    model.clock.white = 5*60;
 }
+
 model.whoseTurn = function(){
-    if(model.turn%2 == 0) return "w";
-    else return "b";
+    if(model.turn%2 == 0) return "white";
+    else return "black";
 }
+model.whatTurn = function(){
+    return Math.floor(model.turn/2)+1;
+}
+
 model.canMove = function(r1,c1,r2,c2){
     if(r1 < 1 || r1 > 8 
         || c1 < 1 || c1 > 8
@@ -54,7 +66,7 @@ model.canMove = function(r1,c1,r2,c2){
     var pieceIdMoved = model.board[r1][c1];
     var pieceIdTaken = model.board[r2][c2];
     if(!pieceIdMoved) return "no piece selected";
-    var player = pieceIdMoved[0];
+    var player = pieceIdMoved[0]=="w" ? "white" : "black";
     if(player != model.whoseTurn()) return "that's not your piece";
     if(pieceIdTaken){
         var playerTaken = pieceIdTaken[0];
@@ -65,11 +77,11 @@ model.canMove = function(r1,c1,r2,c2){
     var pieceType = pieceIdMoved[1];
     if(pieceType=="p"){
         var isLegal = false;
-        var nextRow = player=="w" ? (r1+1) : (r1-1);
+        var nextRow = player=="white" ? (r1+1) : (r1-1);
         if(!pieceIdTaken && (r2==nextRow) && (c1==c2)) isLegal = true;
         if(pieceIdTaken && (r2==nextRow) && Math.abs(c1-c2)==1) isLegal = true;
-        var baseRow = player=="w" ? 2 : 7;
-        var basePlus2Row = player=="w" ? 4 : 5;
+        var baseRow = player=="white" ? 2 : 7;
+        var basePlus2Row = player=="white" ? 4 : 5;
         if(!pieceIdTaken && (r1==baseRow) && (r2==basePlus2Row) 
             && (c1==c2)) isLegal = true;
         //TODO: en passant
@@ -115,7 +127,8 @@ model.canMove = function(r1,c1,r2,c2){
     model.board[r2][c2] = pieceIdMoved;
     model.turn++;
     var inCheck = false;
-    var kid = model.whoseTurn()+"k"; // the king
+    var pid = model.whoseTurn()=="white" ? "w" : "b";
+    var kid = pid+"k"; // the king
     var kloc = model.pieces[kid];
     for(var pid in model.pieces){
         var ploc = model.pieces[pid];
@@ -143,8 +156,25 @@ model.move = function(r1,c1,r2,c2){
     if(pieceIdTaken){
         delete model.pieces[pieceIdTaken];
     }
-
     model.turn++;
+
+    // punch the clock
+    var now = new Date();
+    var diff = 0;
+    if(model.lastMove.date){
+        (now.getTime() - model.lastMove.date.getTime()) / 1000.0;
+    }
+    model.lastMove.date = now;
+    model.lastMove.clock = model.clock[model.whoseTurn()] - diff;
+}
+
+model.updateClock = function(){
+    if(!model.lastMove.date){
+        return;
+    }
+    var diff = (new Date().getTime()- model.lastMove.date.getTime())/1000.0;
+    var c = model.lastMove.clock - diff;
+    model.clock[model.whoseTurn()] = c;
 }
 
 /* VIEW */
@@ -182,14 +212,14 @@ view.reset = function(){
 // updates the board to reflect
 // a move that's been made
 view.update = function() {
-    viwe.updateBoard();
+    view.updateBoard();
     view.updateText();
 };
 
 view.updateText = function() {
     // the label is a sort of "hud" for the game
     var h = "Turn " + model.whatTurn() + " &middot; "; 
-    if(model.whoseTurn()=="w"){
+    if(model.whoseTurn()=="white"){
         h = "White to play";
     } else {
         h = "Black to play";
@@ -238,6 +268,17 @@ view.wireEvents = function(imgElem){
     });
     imgElem.mouseup(function(evt){
     });
+}
+
+view.updateClock = function(){
+    function updateClockLabel(elem, totalSecs){
+        var mins = Math.floor(totalSecs / 60);
+        var secs = Math.floor(totalSecs % 60);
+        elem.toggleClass("lowOnTime", mins==0);
+        elem.text(mins+":"+(secs < 10 ? "0":"")+secs);
+    }
+    updateClockLabel($("#clockW"), model.clock.white);
+    updateClockLabel($("#clockB"), model.clock.black);
 }
 
 /* HELPER METHODS */
@@ -305,15 +346,16 @@ function wireEvents(){
         updateLoc(evt);
     });
 }
+
 $(function(){
     model.reset();
     view.reset();
     view.update();
     wireEvents();
-    setTimeout(function(){
-        model.move(2,5,4,5);
-        view.update();
-    },1000);
+    setInterval(function(){
+        model.updateClock();
+        view.updateClock();
+    },20);
 
 });
 

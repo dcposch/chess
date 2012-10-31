@@ -1,6 +1,6 @@
 
 body {
-font:"Georgia",serif;
+font-family:"Georgia",serif;
 }
 h1 {
 font-size:40px;
@@ -14,14 +14,33 @@ margin:0 auto;
 }
 #footer {
 text-align:center;
+color:#888;
+font-size:9px;
 width:100%;
-height:60px;
+margin-top:30px;
+height:30px;
+}
+
+/* SUPPORTING TEXT */
+#help, #label {
+text-align:center;
+color:#888;
+}
+.clock {
+font-size:48px;
+color:#888;
+position:absolute;
+}
+#clockW {
+top:610px;
+left:180px;
+}
+#clockB {
+top:610px;
+left:680px;
 }
 
 /* BOARD */
-#toplay {
-display:none;
-}
 #board {
 border:none;
 padding:0;
@@ -30,6 +49,9 @@ position:relative;
 left:0;
 width:600px;
 height:600px;
+}
+#board div {
+height:72px;
 }
 #board .square {
 display:inline-block;

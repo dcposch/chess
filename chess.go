@@ -11,5 +11,8 @@ func main() {
     })
     http.Handle("/", http.FileServer(http.Dir("static/")))
 
-    http.ListenAndServe("0.0.0.0:8000", nil)
+    socket := "0.0.0.0:8080"
+    fmt.Println("Serving on "+socket)
+    err := http.ListenAndServe(socket, nil)
+    fmt.Println(err)
 }
