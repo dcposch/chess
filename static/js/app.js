@@ -3,6 +3,7 @@
 
 var model = {
     // this is canonical
+    id:null,
     moves:[],   //strings like "e4e5"
 
     // everything else is computed
@@ -67,7 +68,6 @@ model.reset = function(moves){
             c1 = m.move.charCodeAt(0)-"a".charCodeAt(0)+1,
             r2 = m.move.charCodeAt(3)-"0".charCodeAt(0),
             c2 = m.move.charCodeAt(2)-"a".charCodeAt(0)+1;
-        console.log([m.move,r1,c2,r2,c2]);
         model.moveInner(r1,c1,r2,c2);
         // update lastmove
         var player     = (i%2)==1?"black":"white";
@@ -541,6 +541,7 @@ function wireEvents(){
         }
         if(canMove == "ok"){
             model.move(loc[0],loc[1],dragLoc[0],dragLoc[1]);
+            sendLastMove();
         } else {
             console.log(canMove);
         }
@@ -557,15 +558,63 @@ function wireEvents(){
     });
 }
 
+function sendLastMove(){
+    if(model.id == null) return;
+    var strMove = model.moves[model.moves.length-1].move; // eg "e2e4"
+    console.log("posting move "+strMove);
+    $.post("/api/"+model.id+"/move", strMove, function(data){
+        // should have no effect except syncing the clocks. each move is timestamped.
+        //model.reset(data.moves);
+        console.log("success! posted move");
+    }).error(function(err){
+        console.log(["wtf", err]);
+    });
+}
+
+function poll(){
+    var refresh = function(){
+        console.log("polling /api/"+model.id);
+        $.getJSON("/api/"+model.id, function(data){
+            model.reset(data.moves);
+            view.update();
+        });
+    }
+    var id = document.location.hash.substring(1);
+    if(id===""){
+        // we have no id
+        console.log("creating a new chess game...");
+        $.getJSON("/api/new", function(data){
+            console.log("success! new id is "+data);
+            document.location.hash = "#"+data;
+            model.id=data;
+            refresh();
+        }).error(function(err){
+            console.log(err);
+        });
+    } else {
+        model.id=id;
+        refresh();
+    }
+}
+
+var intervals = [];
+function stop(){
+    for(var i = 0; i < intervals.length; i++){
+        clearInterval(intervals[i]);
+    }
+}
+
 $(function(){
     model.reset([]);
     view.reset();
     view.update();
     wireEvents();
-    setInterval(function(){
+    intervals.push(setInterval(function(){
+        poll();
+    },500));
+    intervals.push(setInterval(function(){
         model.updateClock();
         view.updateClock();
-    },20);
-
+    },20));
 });
 

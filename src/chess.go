@@ -38,13 +38,13 @@ const (
 // of the piece being moved. Rows and col are in [1,8]
 // When you castle, the king is the piece that moves.
 type Move struct {
-    Move string // eg "e2e4"
-    Timestamp int64 // millis after 1970 UTC
+    Move string `json:"move"` // eg "e2e4"
+    Timestamp int64 `json:"timestamp"` // millis after 1970 UTC
 }
 
 type Game struct {
     Id bson.ObjectId "_id"
-    Moves []Move
+    Moves []Move `json:"moves"`
 }
 func (g *Game) ToJSON() string {
     js,err := json.Marshal(g)
@@ -99,8 +99,8 @@ func main() {
             g.Id = bson.NewObjectId()
             collGames.Insert(g)
             fmt.Println("created a new game: "+g.Id.Hex())
-            fmt.Fprintf(w, g.Id.Hex())
-        } else if k==2 && r.Method=="GET" {
+            fmt.Fprintf(w,"\"%s\"\n", g.Id.Hex());
+        } else if k==1 && r.Method=="GET" {
             g,err := findGame(parts[0], collGames)
             if err!=nil {
                 fail(w, 404, fmt.Sprintf("game not found: %v", err))
@@ -112,7 +112,7 @@ func main() {
 
             // construct a new chess move
             data,err := ioutil.ReadAll(r.Body)
-            if err!=nil || len(data)==4 {
+            if err!=nil || len(data)!=4 {
                 fail(w,500,fmt.Sprintf("invalid data %d, err %v", len(data), err))
                 return
             }
