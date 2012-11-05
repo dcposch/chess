@@ -8,7 +8,11 @@ var model = {
     turn:0,     //0-based turn, white goes on 0, black on 1, etc
     outcome:"playing", //otherwise "black", "white", or "tie"
     clock: {black:0, white:0},
-    lastMove: {date:null, clock:0}
+
+    // we need some additional bs to deal with en passant, castling, and the tie rule
+    lastMove: {date:null, clock:0},
+    prevBoards: [],
+    extraQueens: {white:0, black:0}
 };
 
 var view = {
@@ -69,7 +73,7 @@ model.canMove = function(r1,c1,r2,c2){
     var player = pieceIdMoved[0]=="w" ? "white" : "black";
     if(player != model.whoseTurn()) return "that's not your piece";
     if(pieceIdTaken){
-        var playerTaken = pieceIdTaken[0];
+        var playerTaken = pieceIdTaken[0] == "w" ? "white" : "black";
         if(playerTaken == model.whoseTurn()) {
             return "can't take your own piece";
         }
@@ -81,10 +85,22 @@ model.canMove = function(r1,c1,r2,c2){
         if(!pieceIdTaken && (r2==nextRow) && (c1==c2)) isLegal = true;
         if(pieceIdTaken && (r2==nextRow) && Math.abs(c1-c2)==1) isLegal = true;
         var baseRow = player=="white" ? 2 : 7;
+        var basePlus1Row = player=="white" ? 3 : 6;
         var basePlus2Row = player=="white" ? 4 : 5;
-        if(!pieceIdTaken && (r1==baseRow) && (r2==basePlus2Row) 
+        // pawns can move two squares, initially
+        if(!pieceIdTaken && !model.board[basePlus1Row][c1] 
+            && (r1==baseRow) && (r2==basePlus2Row) 
             && (c1==c2)) isLegal = true;
-        //TODO: en passant
+    
+        // en passant. ugh.
+        var opponentBasePlus1Row = player=="white" ? 6 : 3;
+        var pawnDir = player=="white" ? 1 : -1;
+        var lastBoard = model.prevBoards[model.prevBoards.length-2];
+        if(Math.abs(c2-c1)==1 && (r2==nextRow) && (r2==opponentBasePlus1Row) 
+            && lastBoard && lastBoard[r1+2*pawnDir][c2]==model.board[r1][c2]){
+            isLegal = true;
+        }
+
         if(!isLegal) return "pawns can't move like that";
     } else if(pieceType=="b" || pieceType=="r" || pieceType=="q"){
         var isDiagonal = Math.abs(r2-r1) == Math.abs(c2-c1);
@@ -116,47 +132,168 @@ model.canMove = function(r1,c1,r2,c2){
             return "knights move one step straight, then one step diagonally";
         }
     } else if(pieceType=="k"){
-        if(Math.abs(r2-r1)>1 || Math.abs(c2-c1)>1){
+        // allow castling
+        var baseRow = model.whoseTurn()=="white"?1:8;
+        if(r1 == baseRow && r2==baseRow && 
+            c1 == 5 && Math.abs(c2-c1)==2){
+            // attempting to castle. ensure all clear
+            var dir = (c2-c1)/2;
+            for(var i = c1+dir; i > 1 && i < 8; i += dir){
+                if(model.board[baseRow][i]){
+                    return "you cannot castle with pieces in the way";
+                }
+            }
+            // ensure neither piece has moved before
+            var rookCol = c2>c1 ? 8 : 1;
+            var kingId = model.board[baseRow][c1];
+            var rookId = model.board[baseRow][rookCol];
+            for(var i = 0; i < model.prevBoards.length; i++){
+                if(model.prevBoards[i][baseRow][c1] != kingId ||
+                    model.prevBoards[i][baseRow][rookCol] != rookId){
+                    return "can't castle because the king or rook has already been moved";
+                }
+            }
+            // ensure we're not castling "through" check
+            if(model.movesIntoCheck(r1,c1,r1,c1+dir)){
+                return "can't castle through check";
+            }
+        } else if(Math.abs(r2-r1)>1 || Math.abs(c2-c1)>1){
             return "the king moves one square in any direction";
         }
-        //TODO: castle
     }
 
     // make sure we're not moving into check
-    model.board[r1][c1] = "";
-    model.board[r2][c2] = pieceIdMoved;
-    model.turn++;
-    var inCheck = false;
-    var pid = model.whoseTurn()=="white" ? "w" : "b";
-    var kid = pid+"k"; // the king
-    var kloc = model.pieces[kid];
-    for(var pid in model.pieces){
-        var ploc = model.pieces[pid];
-        if(model.canMove(ploc[0],ploc[1],kloc[0],kloc[1]) == "ok"){
-            inCheck = true;
-        }
+    if(model.movesIntoCheck(r1,c1,r2,c2,pieceIdTaken)){
+        return "cannot move into check";
     }
-    model.turn--;
-    model.board[r2][c2] = pieceIdTaken;
-    model.board[r1][c1] = pieceIdMoved;
-    if(inCheck) return "cannot move into check";
     return "ok";
 }
 
+model.movesIntoCheck = function(r1,c1,r2,c2, pieceIdTaken){
+    var ourId = model.whoseTurn()=="white" ? "w" : "b";
+    var pieceIdMoved = model.board[r1][c1];
+    model.board[r1][c1] = "";
+    model.board[r2][c2] = pieceIdMoved;
+    model.pieces[pieceIdMoved] = [r2, c2];
+    var pieceIdTakenLoc = model.pieces[pieceIdTaken];
+    if(pieceIdTaken) delete model.pieces[pieceIdTaken];
+    model.turn++;
+    var inCheck = false;
+    var kid = ourId+"k"; // the king
+    var kloc = model.pieces[kid];
+    assert(kloc && kloc.length==2);
+    for(var pid in model.pieces){
+        if(pid[0] == ourId) continue; // we want their pieces
+        var ploc = model.pieces[pid]; // could it take our king?
+        if(model.canMove(ploc[0],ploc[1],kloc[0],kloc[1]) == "ok"){
+            inCheck = true;
+            break;
+        }
+    }
+    // now undo
+    model.turn--;
+    model.pieces[pieceIdMoved] = [r1, c1];
+    model.board[r1][c1] = pieceIdMoved;
+    model.board[r2][c2] = "";
+    if(pieceIdTaken){
+        model.pieces[pieceIdTaken] = pieceIdTakenLoc;
+        model.board[pieceIdTakenLoc[0]][pieceIdTakenLoc[1]] = pieceIdTaken;
+    }
+
+    return inCheck;
+}
+
 model.move = function(r1,c1,r2,c2){
+    // make sure we're actually playing
+    if(model.outcome != "playing") throw "game over";
+    
+    // make sure it's a legal move
     var pieceIdMoved = model.board[r1][c1];
     var pieceIdTaken = model.board[r2][c2];
     assert(pieceIdMoved);
     var valid = model.canMove(r1,c1,r2,c2);
     if(valid != "ok") throw valid;
 
+    // we're committed. make your move
     model.board[r1][c1] = "";
     model.board[r2][c2] = pieceIdMoved;
     model.pieces[pieceIdMoved] = [r2, c2];
+    // en passant
+    if(pieceIdMoved[1] == "p" && !pieceIdTaken && (c1!=c2)){
+        //pawn moved diagonally onto an empty square.....
+        var opponentPawn = (model.whoseTurn()=="white"?"b":"w") + "p";
+        pieceIdTaken = model.board[r1][c2];
+        console.log("wtf "+pieceIdTaken+" .. "+opponentPawn);
+        assert(pieceIdTaken.substring(0,2) == opponentPawn);
+        model.board[r1][c2] = "";
+    }
+    // castle
+    if(pieceIdMoved[1] == "k" && Math.abs(c1-c2)==2){
+        assert(!pieceIdTaken);
+        assert(r1==r2);
+        var rookCol1 = (c2 < c1) ? 1 : 8; 
+        var rookCol2 = (c1 + c2)/2;
+        var rookId = model.board[r1][rookCol1];
+        assert(rookId);
+        model.board[r1][rookCol1] = "";
+        model.board[r1][rookCol2] = rookId;
+        model.pieces[rookId] = [r1, rookCol2];
+    }
+    // finish the move
     if(pieceIdTaken){
         delete model.pieces[pieceIdTaken];
     }
     model.turn++;
+
+    //now, backup the board
+    var backup = [];
+    for(var i = 0; i <= 8; i++){
+        backup[i] = [];
+        for(var j = 0; j <= 8; j++){
+            backup[i][j] = model.board[i][j];
+        }
+    }
+    model.prevBoards.push(backup);
+
+    // if they have no legal moves left, 
+    // then they are in checkmate
+    var checkmate = true;
+    for(var pid in model.pieces){
+        if(pid[0] == (model.whoseTurn()=="white" ? "b" : "w")){
+            continue;
+        }
+        var loc = model.pieces[pid];
+        for(var i = 1; i <= 8; i++){
+            for(var j = 1; j <= 8; j++){
+                if(model.canMove(loc[0],loc[1],i,j)=="ok"){
+                    checkmate = false;
+                    break;
+                }
+            }
+            if(!checkmate) break;
+        }
+        if(!checkmate) break;
+    }
+    if(checkmate){
+        // victory
+        model.outcome = (model.whoseTurn()=="white"?"black":"white");
+    }
+
+    // if we hit the same board three times, we tie
+    var numSame = 0;
+    for(var i = 0; i < model.prevBoards.length; i++){
+        var same = true;
+        for(var j = 1; j <= 8; j++){
+            for(var k = 1; k <= 8; k++){
+                var cur  = model.board[j][k].substring(0,2);
+                var prev = model.prevBoards[i][j][k].substring(0,2);
+                if(cur != prev) same = false;
+            }
+        }
+        if(same) numSame++;
+    }
+    if(numSame >= 3) model.outcome = "draw";
+    assert(numSame >= 1); //should match at least the cur board
 
     // punch the clock
     var now = new Date();
@@ -169,11 +306,20 @@ model.move = function(r1,c1,r2,c2){
 }
 
 model.updateClock = function(){
+    if(model.outcome != "playing"){
+        return;
+    }
+    // no countdown until the first move has been played
     if(!model.lastMove.date){
         return;
     }
     var diff = (new Date().getTime()- model.lastMove.date.getTime())/1000.0;
     var c = model.lastMove.clock - diff;
+    if(c <= 0){
+        // out of time!
+        c = 0;
+        model.outcome = model.whoseTurn() == "white" ? "black" : "white";
+    }
     model.clock[model.whoseTurn()] = c;
 }
 
@@ -218,11 +364,23 @@ view.update = function() {
 
 view.updateText = function() {
     // the label is a sort of "hud" for the game
-    var h = "Turn " + model.whatTurn() + " &middot; "; 
-    if(model.whoseTurn()=="white"){
-        h = "White to play";
+    var h;
+    if(model.outcome == "white"){
+        var timeStr = (model.clock.black==0)? "Timeout. " : "";
+        h = "<strong>"+timeStr+"White won in "+(model.whatTurn()-1)+" moves!</strong>";
+    } else if(model.outcome == "black"){
+        var timeStr = (model.clock.white==0)? "Timeout. " : "";
+        h = "<strong>"+timeStr+"Black won in "+(model.whatTurn()-1)+" moves!</strong>";
+    } else if(model.outcome == "draw"){
+        h = "<strong>Game Over - Draw</strong>";
     } else {
-        h = "Black to play";
+        assert(model.outcome == "playing");
+        h = "Turn " + model.whatTurn() + " &middot; "; 
+        if(model.whoseTurn()=="white"){
+            h = "White to play";
+        } else {
+            h = "Black to play";
+        }
     }
     h += "<br />";
     view.label.html(h);
@@ -271,9 +429,12 @@ view.wireEvents = function(imgElem){
 }
 
 view.updateClock = function(){
+    if(model.outcome != "playing"){
+        view.updateText();
+    }
     function updateClockLabel(elem, totalSecs){
         var mins = Math.floor(totalSecs / 60);
-        var secs = Math.floor(totalSecs % 60);
+        var secs = Math.ceil(totalSecs % 60);
         elem.toggleClass("lowOnTime", mins==0);
         elem.text(mins+":"+(secs < 10 ? "0":"")+secs);
     }
@@ -312,6 +473,7 @@ function wireEvents(){
         evt.preventDefault(); 
 
         // show what's legal
+        if(model.outcome != "playing") return;
         var loc = model.pieces[dragPiece.id];
         for(var i = 1; i <= 8; i++){
             for(var j = 1; j <= 8; j++){
@@ -329,6 +491,9 @@ function wireEvents(){
         updateLoc(evt);
         var loc = model.pieces[dragPiece.id];
         var canMove = model.canMove(loc[0],loc[1],dragLoc[0],dragLoc[1]);
+        if(model.outcome != "playing"){
+            canMove = "game over";
+        }
         if(canMove == "ok"){
             model.move(loc[0],loc[1],dragLoc[0],dragLoc[1]);
         } else {
