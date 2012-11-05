@@ -12,7 +12,10 @@ var model = {
     clock: {black:0, white:0},
 
     // we need some additional bs to deal with en passant, castling, and the tie rule
-    lastMove: {date:null, clock:0},
+    lastMove: {
+        date:null, // eg date *of the most recent move*, say black's move
+        clock:0    // clock of the current player (white) *just before* that move
+    },
     prevBoards: [],
 };
 
@@ -57,16 +60,28 @@ model.reset = function(moves){
     model.prevBoards = [];
 
     // playback to get to the correct board state
-    for(var i = 1; i < moves.length; i++){
+    for(var i = 0; i < moves.length; i++){
         var m = moves[i];
+        // update board
+        var r1 = m.move.charCodeAt(1)-"0".charCodeAt(0),
+            c1 = m.move.charCodeAt(0)-"a".charCodeAt(0)+1,
+            r2 = m.move.charCodeAt(3)-"0".charCodeAt(0),
+            c2 = m.move.charCodeAt(2)-"a".charCodeAt(0)+1;
+        console.log([m.move,r1,c2,r2,c2]);
+        model.moveInner(r1,c1,r2,c2);
+        // update lastmove
+        var player     = (i%2)==1?"black":"white";
+        var nextPlayer = (i%2)==1?"white":"black";
+        model.lastMove.clock = model.clock[nextPlayer];
+        model.lastMove.date = new Date(moves[i].timestamp);
+        // update clocks
+        if(i==0)continue;
         var millisTaken = moves[i].timestamp - moves[i-1].timestamp; 
         assert(millisTaken > 0);
-        model.clock[(i%2)==1?"white":"black"] -= millisTaken/1000;
+        model.clock[player] -= millisTaken/1000;
     }
-    if(moves.length > 0){
-        model.lastMove.date = moves[moves.length-1].timestamp;
-        model.lastMove.clock = model.clock[model.whoseTurn()];
-    }
+    // win/lose/tie
+    model.updateOutcome();
 }
 
 model.whoseTurn = function(){
@@ -283,7 +298,7 @@ model.move = function(r1,c1,r2,c2){
     if(valid != "ok") throw valid;
 
     // do it
-    model.moveInner(r1,c1,r2,c2)
+    //model.moveInner(r1,c1,r2,c2)
 
     // record it
     var colNames = ["", "a","b","c","d","e","f","g","h"]
@@ -292,7 +307,9 @@ model.move = function(r1,c1,r2,c2){
         "timestamp":new Date().getTime()
     });
 
-    // did we win? lose? tie
+    model.reset(model.moves);
+
+    /*// did we win? lose? tie
     model.updateOutcome()
 
     // punch the clock
@@ -302,7 +319,7 @@ model.move = function(r1,c1,r2,c2){
         diff = (now.getTime() - model.lastMove.date.getTime()) / 1000.0;
     }
     model.lastMove.date = now;
-    model.lastMove.clock = model.clock[model.whoseTurn()] - diff;
+    model.lastMove.clock = model.clock[model.whoseTurn()] - diff;*/
 }
 
 // checks whether someone just won, or we tied
