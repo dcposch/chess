@@ -2,17 +2,18 @@
 // Fall 2012 
 
 var model = {
+    // this is canonical
+    moves:[],   //strings like "e4e5"
+
+    // everything else is computed
     board:[[]], //piece ids like "wK" or "wp1"
     pieces:{},  //piece id -> [row,col] 0-based
-    moves:[],   //strings like "e4e5"
-    turn:0,     //0-based turn, white goes on 0, black on 1, etc
     outcome:"playing", //otherwise "black", "white", or "tie"
     clock: {black:0, white:0},
 
     // we need some additional bs to deal with en passant, castling, and the tie rule
     lastMove: {date:null, clock:0},
     prevBoards: [],
-    extraQueens: {white:0, black:0}
 };
 
 var view = {
@@ -24,7 +25,7 @@ var view = {
 
 
 /* MODEL */
-model.reset = function(){
+model.reset = function(moves){
     // starting configuration
     model.board = [
         [], // allow 1-based indexing
@@ -44,19 +45,36 @@ model.reset = function(){
             model.pieces[model.board[i][j]] = [i,j];
         }
     }
-    model.moves = [];
+    model.moves = moves;
+    model.outcome = "playing";
 
     // each player gets five minutes
     model.clock.black = 5*60;
     model.clock.white = 5*60;
+
+    // reset the extra vars
+    model.lastMove = {date:null, clock:0};
+    model.prevBoards = [];
+
+    // playback to get to the correct board state
+    for(var i = 1; i < moves.length; i++){
+        var m = moves[i];
+        var millisTaken = moves[i].timestamp - moves[i-1].timestamp; 
+        assert(millisTaken > 0);
+        model.clock[(i%2)==1?"white":"black"] -= millisTaken/1000;
+    }
+    if(moves.length > 0){
+        model.lastMove.date = moves[moves.length-1].timestamp;
+        model.lastMove.clock = model.clock[model.whoseTurn()];
+    }
 }
 
 model.whoseTurn = function(){
-    if(model.turn%2 == 0) return "white";
+    if(model.moves.length%2 == 0) return "white";
     else return "black";
 }
 model.whatTurn = function(){
-    return Math.floor(model.turn/2)+1;
+    return Math.floor(model.moves.length/2)+1;
 }
 
 model.canMove = function(r1,c1,r2,c2){
@@ -177,7 +195,7 @@ model.movesIntoCheck = function(r1,c1,r2,c2, pieceIdTaken){
     model.pieces[pieceIdMoved] = [r2, c2];
     var pieceIdTakenLoc = model.pieces[pieceIdTaken];
     if(pieceIdTaken) delete model.pieces[pieceIdTaken];
-    model.turn++;
+    model.moves.push("dummy");
     var inCheck = false;
     var kid = ourId+"k"; // the king
     var kloc = model.pieces[kid];
@@ -191,7 +209,7 @@ model.movesIntoCheck = function(r1,c1,r2,c2, pieceIdTaken){
         }
     }
     // now undo
-    model.turn--;
+    model.moves.pop();
     model.pieces[pieceIdMoved] = [r1, c1];
     model.board[r1][c1] = pieceIdMoved;
     model.board[r2][c2] = "";
@@ -203,18 +221,10 @@ model.movesIntoCheck = function(r1,c1,r2,c2, pieceIdTaken){
     return inCheck;
 }
 
-model.move = function(r1,c1,r2,c2){
-    // make sure we're actually playing
-    if(model.outcome != "playing") throw "game over";
-    
-    // make sure it's a legal move
+model.moveInner = function(r1,c1,r2,c2){
     var pieceIdMoved = model.board[r1][c1];
     var pieceIdTaken = model.board[r2][c2];
-    assert(pieceIdMoved);
-    var valid = model.canMove(r1,c1,r2,c2);
-    if(valid != "ok") throw valid;
 
-    // we're committed. make your move
     model.board[r1][c1] = "";
     model.board[r2][c2] = pieceIdMoved;
     model.pieces[pieceIdMoved] = [r2, c2];
@@ -239,11 +249,18 @@ model.move = function(r1,c1,r2,c2){
         model.board[r1][rookCol2] = rookId;
         model.pieces[rookId] = [r1, rookCol2];
     }
-    // finish the move
+    // pawn promotion
+    var oppRow = (model.whoseTurn()=="white"?8:1);
+    if(pieceIdMoved[1]=="p" && r2==oppRow){
+        delete model.pieces[pieceIdMoved];
+        pieceIdMoved = pieceIdMoved[0]+"q"+pieceIdMoved.substring(2);
+        model.board[r2][c2] = pieceIdMoved;
+        model.pieces[pieceIdMoved] = [r2, c2];
+    }
+    // take a piece?
     if(pieceIdTaken){
         delete model.pieces[pieceIdTaken];
     }
-    model.turn++;
 
     //now, backup the board
     var backup = [];
@@ -254,7 +271,42 @@ model.move = function(r1,c1,r2,c2){
         }
     }
     model.prevBoards.push(backup);
+}
 
+model.move = function(r1,c1,r2,c2){
+    // make sure we're actually playing
+    if(model.outcome != "playing") throw "game over";
+    
+    // make sure it's a legal move
+    assert(model.board[r1][c1]);
+    var valid = model.canMove(r1,c1,r2,c2);
+    if(valid != "ok") throw valid;
+
+    // do it
+    model.moveInner(r1,c1,r2,c2)
+
+    // record it
+    var colNames = ["", "a","b","c","d","e","f","g","h"]
+    model.moves.push({
+        "move":colNames[c1]+r1+colNames[c2]+r2,
+        "timestamp":new Date().getTime()
+    });
+
+    // did we win? lose? tie
+    model.updateOutcome()
+
+    // punch the clock
+    var now = new Date();
+    var diff = 0;
+    if(model.lastMove.date){
+        diff = (now.getTime() - model.lastMove.date.getTime()) / 1000.0;
+    }
+    model.lastMove.date = now;
+    model.lastMove.clock = model.clock[model.whoseTurn()] - diff;
+}
+
+// checks whether someone just won, or we tied
+model.updateOutcome = function(){
     // if they have no legal moves left, 
     // then they are in checkmate
     var checkmate = true;
@@ -278,31 +330,6 @@ model.move = function(r1,c1,r2,c2){
         // victory
         model.outcome = (model.whoseTurn()=="white"?"black":"white");
     }
-
-    // if we hit the same board three times, we tie
-    var numSame = 0;
-    for(var i = 0; i < model.prevBoards.length; i++){
-        var same = true;
-        for(var j = 1; j <= 8; j++){
-            for(var k = 1; k <= 8; k++){
-                var cur  = model.board[j][k].substring(0,2);
-                var prev = model.prevBoards[i][j][k].substring(0,2);
-                if(cur != prev) same = false;
-            }
-        }
-        if(same) numSame++;
-    }
-    if(numSame >= 3) model.outcome = "draw";
-    assert(numSame >= 1); //should match at least the cur board
-
-    // punch the clock
-    var now = new Date();
-    var diff = 0;
-    if(model.lastMove.date){
-        (now.getTime() - model.lastMove.date.getTime()) / 1000.0;
-    }
-    model.lastMove.date = now;
-    model.lastMove.clock = model.clock[model.whoseTurn()] - diff;
 }
 
 model.updateClock = function(){
@@ -355,6 +382,7 @@ view.reset = function(){
         }
     }
 }
+
 // updates the board to reflect
 // a move that's been made
 view.update = function() {
@@ -434,7 +462,7 @@ view.updateClock = function(){
     }
     function updateClockLabel(elem, totalSecs){
         var mins = Math.floor(totalSecs / 60);
-        var secs = Math.ceil(totalSecs % 60);
+        var secs = Math.floor(totalSecs % 60);
         elem.toggleClass("lowOnTime", mins==0);
         elem.text(mins+":"+(secs < 10 ? "0":"")+secs);
     }
@@ -513,7 +541,7 @@ function wireEvents(){
 }
 
 $(function(){
-    model.reset();
+    model.reset([]);
     view.reset();
     view.update();
     wireEvents();
